@@ -13,6 +13,8 @@ const S3_PATHNAME = process.env.MEDUSA_CLOUD_S3_PATHNAME
  */
 const nextConfig = {
   reactStrictMode: true,
+  // Docker: standalone-Build fuer minimales Production-Image
+  output: "standalone",
   logging: {
     fetches: {
       fullUrl: true,

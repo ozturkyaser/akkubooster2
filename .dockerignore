@@ -1,0 +1,55 @@
+# Dependencies (werden im Container neu installiert)
+**/node_modules
+**/.pnpm-store
+
+# Build-Output
+**/.next
+**/.medusa
+**/dist
+**/build
+**/out
+
+# Env (kommt via env_file, nicht ins Image!)
+.env
+.env.local
+.env.*.local
+**/*.env
+**/*.env.local
+!.env.production.example
+!.env.example
+
+# Git
+.git
+.gitignore
+.github
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# Logs / Cache
+*.log
+**/.cache
+**/.turbo
+**/.eslintcache
+**/tsconfig.tsbuildinfo
+
+# OS
+.DS_Store
+
+# Tests / Coverage
+coverage
+**/__tests__
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+
+# Studio (deployed separat zu Sanity)
+studio
+
+# Backend uploads (laufen in Volume, nicht ins Image)
+backend/uploads
+
+# Node-Module Cache
+.pnpm-store
