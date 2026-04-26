@@ -1,0 +1,185 @@
+# ============================================
+# AkkuBooster — Digital Ocean App Platform Spec
+# https://docs.digitalocean.com/products/app-platform/reference/app-spec/
+#
+# Auto-Deploy via GitHub: jeder Push auf main triggert Build + Deploy.
+#
+# Deploy-Workflow:
+#   1. doctl apps create --spec .do/app.yaml          (einmalig)
+#   2. ENV-Secrets im DO-Dashboard ergaenzen (Type: SECRET)
+#   3. doctl apps update <APP_ID> --spec .do/app.yaml (bei Spec-Aenderungen)
+# ============================================
+
+name: akkubooster
+region: fra              # Frankfurt (FRA1)
+
+# ── Domains ─────────────────────────────────────────────
+domains:
+  - domain: dev.akkubooster.de
+    type: PRIMARY
+    zone: akkubooster.de
+  - domain: admin.dev.akkubooster.de
+    type: ALIAS
+    zone: akkubooster.de
+
+# ── Managed Database ────────────────────────────────────
+databases:
+  - name: akkubooster-db
+    engine: PG
+    version: "16"
+    production: false        # "Dev Database" Tier (~$15/mo, 1 GB)
+    cluster_name: akkubooster-pg
+    db_name: akkubooster
+    db_user: doadmin
+
+# ── Backend (Medusa) ────────────────────────────────────
+services:
+  - name: backend
+    github:
+      repo: ozturkyaser/akkubooster2
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    dockerfile_path: backend/Dockerfile
+    instance_count: 1
+    instance_size_slug: basic-xs        # 1 vCPU / 1 GB RAM ($12/mo)
+    http_port: 9000
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 60
+      period_seconds: 30
+      timeout_seconds: 10
+      failure_threshold: 5
+    routes:
+      - path: /
+    # Domain-Routing: Backend hoert nur auf admin-Subdomain
+    cors:
+      allow_origins:
+        - prefix: https://dev.akkubooster.de
+        - prefix: https://admin.dev.akkubooster.de
+      allow_methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+      allow_headers: ["*"]
+      allow_credentials: true
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "9000"
+      - key: DATABASE_URL
+        value: ${akkubooster-db.DATABASE_URL}
+      - key: STORE_CORS
+        value: https://dev.akkubooster.de
+      - key: ADMIN_CORS
+        value: https://admin.dev.akkubooster.de
+      - key: AUTH_CORS
+        value: https://dev.akkubooster.de,https://admin.dev.akkubooster.de
+      # ── SECRETS — im DO-Dashboard auf Type "SECRET" setzen ──
+      - key: JWT_SECRET
+        type: SECRET
+        value: REPLACE_IN_DO_DASHBOARD          # openssl rand -base64 64
+      - key: COOKIE_SECRET
+        type: SECRET
+        value: REPLACE_IN_DO_DASHBOARD          # openssl rand -base64 64
+      - key: STRIPE_API_KEY
+        type: SECRET
+        value: REPLACE_IN_DO_DASHBOARD
+      - key: STRIPE_WEBHOOK_SECRET
+        type: SECRET
+        value: REPLACE_IN_DO_DASHBOARD
+      - key: PAYPAL_CLIENT_ID
+        type: SECRET
+        value: REPLACE_IN_DO_DASHBOARD
+      - key: PAYPAL_CLIENT_SECRET
+        type: SECRET
+        value: REPLACE_IN_DO_DASHBOARD
+      - key: PAYPAL_SANDBOX
+        value: "false"
+      - key: ANTHROPIC_API_KEY
+        type: SECRET
+        value: REPLACE_IN_DO_DASHBOARD
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-4-6
+      - key: RESEND_API_KEY
+        type: SECRET
+        value: REPLACE_IN_DO_DASHBOARD
+      - key: RESEND_FROM_EMAIL
+        value: noreply@akkubooster.de
+
+  # ── Storefront (Next.js) ────────────────────────────────
+  - name: storefront
+    github:
+      repo: ozturkyaser/akkubooster2
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    dockerfile_path: storefront/Dockerfile
+    instance_count: 1
+    instance_size_slug: basic-xs        # 1 vCPU / 1 GB RAM ($12/mo)
+    http_port: 8001
+    health_check:
+      http_path: /
+      initial_delay_seconds: 60
+      period_seconds: 30
+    routes:
+      - path: /
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "8001"
+      # Server-side: ueber DO interne Service-Discovery
+      - key: MEDUSA_BACKEND_URL
+        value: ${backend.PRIVATE_URL}
+      # Public: HTTPS-URL fuer Browser
+      - key: NEXT_PUBLIC_MEDUSA_BACKEND_URL
+        value: https://admin.dev.akkubooster.de
+      - key: NEXT_PUBLIC_BASE_URL
+        value: https://dev.akkubooster.de
+      - key: NEXT_PUBLIC_DEFAULT_REGION
+        value: de
+      - key: NEXT_PUBLIC_SANITY_PROJECT_ID
+        value: ep5dzepn
+      - key: NEXT_PUBLIC_SANITY_DATASET
+        value: production
+      - key: NEXT_PUBLIC_SANITY_STUDIO_URL
+        value: https://akkubooster.sanity.studio
+      # ── Build-Args (in Dockerfile als ARG deklariert) ──
+      # App Platform reicht ENV automatisch als Build-Arg an Docker weiter
+      # ── SECRETS ──
+      - key: NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY
+        type: SECRET
+        value: REPLACE_AFTER_FIRST_BACKEND_DEPLOY      # erst nach 1. Backend-Start im Admin generieren
+      - key: SANITY_API_READ_TOKEN
+        type: SECRET
+        value: REPLACE_IN_DO_DASHBOARD
+      - key: NEXT_PUBLIC_STRIPE_KEY
+        type: SECRET
+        value: REPLACE_IN_DO_DASHBOARD
+      - key: NEXT_PUBLIC_PAYPAL_CLIENT_ID
+        type: SECRET
+        value: REPLACE_IN_DO_DASHBOARD
+      - key: REVALIDATE_SECRET
+        type: SECRET
+        value: REPLACE_IN_DO_DASHBOARD                  # openssl rand -hex 32
+
+# ── Routing-Hinweis ─────────────────────────────────────
+# DO routet automatisch nach Domain:
+#   dev.akkubooster.de        → storefront
+#   admin.dev.akkubooster.de  → backend
+# Beide Services auf path "/" — DO unterscheidet anhand der Host-Domain.
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /
+        host:
+          - "dev.akkubooster.de"
+      component:
+        name: storefront
+    - match:
+        path:
+          prefix: /
+        host:
+          - "admin.dev.akkubooster.de"
+      component:
+        name: backend
